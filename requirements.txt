@@ -1,0 +1,22 @@
+# requirements.txt
+fastapi
+uvicorn
+langchain
+pinecone
+streamlit
+google-auth-oauthlib
+google-api-python-client
+python-dotenv
+pydantic
+pydantic-settings
+requests
+plotly
+pandas
+python-multipart
+passlib[bcrypt]
+python-jose[cryptography]
+PyJWT
+bcrypt
+cryptography
+pydantic[email]
+llama-cpp-python
