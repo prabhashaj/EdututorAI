@@ -34,24 +34,58 @@ class QuizGenerator:
     def submit_quiz(self, quiz_id: str, user_id: str, answers: Dict) -> Optional[Dict]:
         """Submit quiz answers"""
         try:
+            payload = {
+                "quiz_id": quiz_id,
+                "user_id": user_id,
+                "answers": answers
+            }
+            
             response = requests.post(
                 f"{self.api_base_url}/quiz/submit",
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                st.success("✅ Quiz submitted successfully!")
+                return result
+            else:
+                st.error(f"❌ Failed to submit quiz: Status {response.status_code}")
+                st.error(f"Error details: {response.text}")
+                return None
+                
+        except requests.exceptions.Timeout:
+            st.error("❌ Request timed out. Please try again.")
+            return None
+        except requests.exceptions.ConnectionError:
+            st.error("❌ Cannot connect to server. Please check if the backend is running.")
+            return None
+        except Exception as e:
+            st.error(f"❌ Error submitting quiz: {str(e)}")
+            return None
+    
+    def assign_quiz(self, quiz_id: str, student_ids: list, notification_message: str = "") -> bool:
+        """Assign a quiz to students"""
+        try:
+            response = requests.post(
+                f"{self.api_base_url}/quiz/assign",
                 json={
                     "quiz_id": quiz_id,
-                    "user_id": user_id,
-                    "answers": answers
+                    "student_ids": student_ids,
+                    "notification_message": notification_message
                 }
             )
             
             if response.status_code == 200:
-                return response.json()
+                return True
             else:
-                st.error(f"Failed to submit quiz: {response.text}")
-                return None
+                st.error(f"Failed to assign quiz: {response.text}")
+                return False
                 
         except Exception as e:
-            st.error(f"Quiz submission error: {str(e)}")
-            return None
+            st.error(f"Quiz assignment error: {str(e)}")
+            return False
     
     def render_quiz_form(self) -> Optional[Dict]:
         """Render quiz generation form"""
@@ -113,61 +147,74 @@ class QuizGenerator:
                 
         return None
     
-    def render_quiz_interface(self, quiz: Dict) -> Optional[Dict]:
+    def render_quiz_interface(self, quiz: Optional[Dict]) -> Optional[Dict]:
         """Render quiz taking interface"""
-        st.subheader(f"📝 {quiz['title']}")
+        if not quiz:
+            st.info("No quiz is currently selected. Please select a quiz to begin.")
+            return None
+            
+        st.subheader(f"📝 {quiz.get('title', quiz.get('topic', 'Quiz'))}")
         
         # Quiz info
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.info(f"**Topic:** {quiz['topic']}")
+            st.info(f"**Topic:** {quiz.get('topic', 'Unknown')}")
         with col2:
-            st.info(f"**Difficulty:** {quiz['difficulty']}/5")
+            st.info(f"**Difficulty:** {quiz.get('difficulty', 'Unknown')}/5")
         with col3:
-            st.info(f"**Questions:** {len(quiz['questions'])}")
+            st.info(f"**Questions:** {len(quiz.get('questions', []))}")
         
         st.markdown("---")
         
-        # Quiz questions
+        # Quiz questions with form
+        questions = quiz.get('questions', [])
+        if not questions:
+            st.error("No questions found in this quiz.")
+            return None
+        
         answers = {}
         
         with st.form("quiz_submission_form"):
-            for i, question in enumerate(quiz['questions']):
+            for i, question in enumerate(questions):
                 st.markdown(f"### Question {i+1}")
                 st.markdown(f"**{question['question']}**")
                 
                 # Radio buttons for options
+                options = question.get('options', [])
+                if not options:
+                    st.error(f"No options found for question {i+1}")
+                    continue
+                
                 selected_answer = st.radio(
-                    f"Choose your answer:",
-                    question['options'],
+                    "Choose your answer:",
+                    options,
                     key=f"question_{i}",
                     index=None
                 )
                 
                 if selected_answer:
-                    answers[i] = selected_answer
+                    answers[str(i)] = selected_answer
                 
                 st.markdown("---")
             
-            # Progress indicator
-            progress = len(answers) / len(quiz['questions'])
-            st.progress(progress)
-            st.caption(f"Answered: {len(answers)}/{len(quiz['questions'])} questions")
+            # Simple submit button - always enabled
+            st.markdown("### Submit Your Quiz")
+            st.info("Make sure you have answered all questions before submitting.")
             
-            # Submit buttons
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            with col2:
-                submitted = st.form_submit_button(
-                    "✅ Submit Quiz",
-                    use_container_width=True,
-                    type="primary",
-                    disabled=len(answers) != len(quiz['questions'])
-                )
+            submitted = st.form_submit_button(
+                "✅ Submit Quiz",
+                type="primary",
+                use_container_width=True
+            )
             
             if submitted:
-                return answers
-                
+                # Check if all questions are answered
+                if len(answers) == len(questions):
+                    return answers
+                else:
+                    st.error(f"⚠️ Please answer all {len(questions)} questions. You have answered {len(answers)} questions.")
+                    return None
+        
         return None
     
     def render_quiz_result(self, result: Dict):

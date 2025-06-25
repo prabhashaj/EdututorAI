@@ -20,7 +20,7 @@ pinecone_service = PineconeService()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# In-memory user storage (use database in production)
+# In-memory user storage (will be populated later)
 users_db = {}
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -107,33 +107,63 @@ async def register(user_data: UserCreate):
 @router.post("/login", response_model=dict)
 async def login(user_credentials: UserLogin):
     """Login user"""
-    db = SessionLocal()
     try:
-        db_user = db.query(UserDB).filter(UserDB.email == user_credentials.email).first()
         print(f"[DEBUG] Login attempt for: {user_credentials.email}")
-        if not db_user:
+        print(f"[DEBUG] users_db has {len(users_db)} users")
+        
+        # Check predefined users first
+        for user_id, user in users_db.items():
+            print(f"[DEBUG] Checking against user_id: {user_id}, email: {user['email']}")
+            if user["email"] == user_credentials.email:
+                # Found matching email in predefined users
+                if verify_password(user_credentials.password, user["hashed_password"]):
+                    print(f"[DEBUG] Password verification succeeded for predefined user {user['email']}")
+                    access_token = create_access_token(data={"sub": user_id})
+                    return {
+                        "access_token": access_token,
+                        "token_type": "bearer",
+                        "user": {
+                            "id": user_id,
+                            "email": user["email"],
+                            "name": user["name"],
+                            "role": user["role"]
+                        }
+                    }
+                else:
+                    print(f"[DEBUG] Password verification failed for predefined user {user['email']}")
+                    raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # If not found in predefined users, try database
+        db = SessionLocal()
+        try:
+            db_user = db.query(UserDB).filter(UserDB.email == user_credentials.email).first()
+            if not db_user:
+                db.close()
+                print("[DEBUG] User not found in database.")
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+                
+            print(f"[DEBUG] Found user in database: {db_user.email}")
+            if not db_user.hashed_password or not verify_password(user_credentials.password, db_user.hashed_password):
+                db.close()
+                print(f"[DEBUG] Password verification failed for {db_user.email}")
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+                
+            print(f"[DEBUG] Password verification succeeded for {db_user.email}")
+            access_token = create_access_token(data={"sub": db_user.id})
+            user_response = {
+                "id": db_user.id,
+                "email": db_user.email,
+                "name": db_user.name,
+                "role": db_user.role
+            }
             db.close()
-            print("[DEBUG] User not found.")
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        print(f"[DEBUG] Found user: {db_user.email}, hashed_password: {db_user.hashed_password}")
-        if not db_user.hashed_password or not verify_password(user_credentials.password, db_user.hashed_password):
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": user_response
+            }
+        finally:
             db.close()
-            print(f"[DEBUG] Password verification failed for {db_user.email}")
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        print(f"[DEBUG] Password verification succeeded for {db_user.email}")
-        access_token = create_access_token(data={"sub": db_user.id})
-        user_response = {
-            "id": db_user.id,
-            "email": db_user.email,
-            "name": db_user.name,
-            "role": db_user.role
-        }
-        db.close()
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": user_response
-        }
     except Exception as e:
         db.close()
         print(f"[DEBUG] Exception in login: {e}")

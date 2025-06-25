@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 import sys
 import os
@@ -18,6 +19,10 @@ def render_educator_dashboard():
         return
     
     user = st.session_state.user
+    
+    # Set default page to "Quiz Assignment" if not already set
+    if 'educator_page' not in st.session_state:
+        st.session_state.educator_page = "📝 Quiz Assignment"
     
     # Page config
     st.set_page_config(
@@ -52,6 +57,16 @@ def render_educator_dashboard():
             text-align: center;
             border: 1px solid #dee2e6;
         }
+        .big-button {
+            background-color: #1E88E5;
+            color: white;
+            padding: 15px 20px;
+            font-size: 18px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -66,27 +81,28 @@ def render_educator_dashboard():
     # Sidebar navigation
     with st.sidebar:
         st.markdown("### 🧭 Navigation")
-        page = st.radio(
+        current_page = st.radio(
             "Go to:",
-            ["📊 Class Analytics", "👥 Student Progress", "📝 Quiz Management", "📚 Content Library", "⚙️ Settings"],
-            key="educator_nav"
+            ["📝 Quiz Assignment", "📊 Student Progress & Analysis", "📚 Quiz History"],
+            key="educator_nav_radio",
+            index=0 if st.session_state.educator_page == "📝 Quiz Assignment" else 
+                  1 if st.session_state.educator_page == "📊 Student Progress & Analysis" else 2
         )
+        
+        # Update the current page after the widget is rendered
+        st.session_state.educator_page = current_page
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             logout_user()
     
     # Route to different pages
-    if page == "📊 Class Analytics":
-        render_class_analytics()
-    elif page == "👥 Student Progress":
-        render_student_management()
-    elif page == "📝 Quiz Management":
-        render_quiz_management()
-    elif page == "📚 Content Library":
-        render_content_library()
-    elif page == "⚙️ Settings":
-        render_educator_settings()
+    if st.session_state.educator_page == "📝 Quiz Assignment":
+        render_quiz_assignment()
+    elif st.session_state.educator_page == "📊 Student Progress & Analysis":
+        render_student_progress_analysis()
+    elif st.session_state.educator_page == "📚 Quiz History":
+        render_quiz_history()
 
 def render_class_analytics():
     """Render class analytics overview"""
@@ -353,6 +369,9 @@ def render_quiz_management():
                 if quiz:
                     st.success("✅ Quiz generated successfully!")
                     
+                    # Store quiz in session
+                    st.session_state.current_quiz = quiz
+                    
                     # Preview quiz
                     st.markdown("### 👀 Quiz Preview")
                     st.markdown(f"**Title:** {quiz['title']}")
@@ -366,6 +385,37 @@ def render_quiz_management():
                             for j, option in enumerate(question['options']):
                                 st.markdown(f"   {chr(65+j)}) {option}")
                             st.markdown("---")
+                    
+                    # Assign to students section
+                    st.markdown("### 🎯 Assign Quiz to Students")
+                    
+                    # Hardcoded student list for demo
+                    students = [
+                        {"id": "student_id", "name": "Student User", "email": "student@edututor.ai"}
+                    ]
+                    
+                    selected_students = []
+                    for student in students:
+                        if st.checkbox(f"{student['name']} ({student['email']})", value=True):
+                            selected_students.append(student['id'])
+                    
+                    notification = st.text_area("Notification Message (Optional)", 
+                                              value=f"New quiz on {quiz['topic']} has been assigned to you.")
+                    
+                    if st.button("📤 Assign Quiz to Selected Students", use_container_width=True):
+                        if selected_students:
+                            success = quiz_gen.assign_quiz(
+                                quiz['id'],
+                                selected_students,
+                                notification
+                            )
+                            
+                            if success:
+                                st.success(f"✅ Quiz assigned to {len(selected_students)} student(s)!")
+                            else:
+                                st.error("❌ Failed to assign quiz")
+                        else:
+                            st.warning("⚠️ Please select at least one student")
     
     with tab2:
         st.markdown("### 📚 Quiz Templates")
@@ -527,6 +577,171 @@ def render_educator_settings():
                 st.info("📊 Generating activity summary...")
                 st.success("✅ Report generated successfully!")
 
+def render_quiz_assignment():
+    """Render quiz assignment interface"""
+    st.markdown("## 📝 Quiz Assignment")
+    
+    # Create a simple, clear UI for creating and assigning quizzes
+    quiz_gen = QuizGenerator("http://localhost:8000/api")
+    
+    # Main quiz creation form
+    st.markdown("### 🎯 Create a New Quiz")
+    st.markdown("Enter the details below to generate a new quiz for your students.")
+    
+    with st.form("quiz_generation_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                topic = st.text_input(
+                    "Topic",
+                    placeholder="e.g., Python Programming, Mathematics, History",
+                    help="Enter the subject or topic for your quiz"
+                )
+                
+                difficulty = st.select_slider(
+                    "Difficulty Level",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: {
+                        1: "⭐ Very Easy",
+                        2: "⭐⭐ Easy", 
+                        3: "⭐⭐⭐ Medium",
+                        4: "⭐⭐⭐⭐ Hard",
+                        5: "⭐⭐⭐⭐⭐ Very Hard"
+                    }[x]
+                )
+            
+            with col2:
+                num_questions = st.slider(
+                    "Number of Questions",
+                    min_value=3,
+                    max_value=15,
+                    value=5,
+                    help="Choose how many questions you want in your quiz"
+                )
+                
+                quiz_type = st.selectbox(
+                    "Quiz Type",
+                    ["Multiple Choice", "True/False", "Mixed"],
+                    help="Select the type of questions"
+                )
+            
+            generate_btn = st.form_submit_button(
+                "🚀 Generate Quiz",
+                use_container_width=True,
+                type="primary"
+            )
+    
+    # Quiz generation and preview
+    if generate_btn and topic:
+        with st.spinner("🤖 Generating quiz..."):
+            quiz = quiz_gen.generate_quiz(
+                topic,
+                difficulty,
+                num_questions
+            )
+            
+            if quiz and isinstance(quiz, dict) and 'id' in quiz and 'questions' in quiz:
+                # Store quiz in session for preview
+                st.session_state.current_quiz = quiz
+                # Show success message
+                st.success("✅ Quiz generated successfully! Please review the questions below.")
+            else:
+                st.error("❌ Failed to generate quiz. Please try again with a different topic or settings.")
+                # Clear any partial quiz data
+                if 'current_quiz' in st.session_state:
+                    del st.session_state.current_quiz
+    else:
+        if generate_btn:
+            st.error("⚠️ Please enter a topic for your quiz!")
+    
+    # Display quiz preview if a quiz has been properly generated
+    if ('current_quiz' in st.session_state and 
+        st.session_state.current_quiz and 
+        isinstance(st.session_state.current_quiz, dict) and
+        'id' in st.session_state.current_quiz and
+        'questions' in st.session_state.current_quiz):
+        
+        quiz = st.session_state.current_quiz
+        
+        st.markdown("---")
+        st.markdown("### 👀 Quiz Preview")
+        
+        # Quiz details
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"**Topic:** {quiz.get('topic', 'Unknown')}")
+        with col2:
+            st.info(f"**Difficulty:** {quiz.get('difficulty', 'Unknown')}/5")
+        with col3:
+            st.info(f"**Questions:** {len(quiz.get('questions', []))}")
+        
+        # Show questions for review
+        st.markdown("#### 📋 Questions to Review:")
+        questions = quiz.get('questions', [])
+        for i, question in enumerate(questions):
+            with st.expander(f"Question {i+1}: {question['question'][:60]}..."):
+                st.markdown(f"**Q{i+1}:** {question['question']}")
+                st.markdown("**Options:**")
+                for j, option in enumerate(question.get('options', [])):
+                    st.markdown(f"   {chr(65+j)}) {option}")
+        
+        st.markdown("---")
+        
+        # Assignment section
+        st.markdown("### 👥 Assign Quiz to Students")
+        st.markdown("Review the quiz above and assign it to your students when you're satisfied with the questions.")
+        
+        # Notification message for students
+        notification_message = st.text_area(
+            "Message to Students",
+            value=f"A new quiz on {quiz.get('topic', 'this topic')} has been assigned to you. Please complete it at your earliest convenience.",
+            help="This message will be shown to students when they see the assigned quiz"
+        )
+        
+        # Student selection (hardcoded for demo)
+        st.markdown("**Select Students:**")
+        students = [
+            {"id": "student_id", "name": "Student User", "email": "student@edututor.ai"}
+        ]
+        
+        selected_students = []
+        for student in students:
+            if st.checkbox(f"✅ {student['name']} ({student['email']})", value=True, key=f"student_{student['id']}"):
+                selected_students.append(student['id'])
+        
+        # Assignment button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("📤 Assign Quiz to Selected Students", use_container_width=True, type="primary"):
+                if selected_students and 'id' in quiz:
+                    success = quiz_gen.assign_quiz(
+                        quiz['id'],
+                        selected_students,
+                        notification_message
+                    )
+                    
+                    if success:
+                        st.success(f"✅ Quiz '{quiz.get('topic', 'Unknown')}' has been assigned to {len(selected_students)} student(s)!")
+                        st.info("Students will see this quiz in their dashboard when they log in.")
+                        # Clear the current quiz from session after successful assignment
+                        del st.session_state.current_quiz
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to assign quiz. Please try again.")
+                elif not selected_students:
+                    st.warning("⚠️ Please select at least one student to assign the quiz.")
+                else:
+                    st.error("❌ Quiz ID not found. Please generate a new quiz.")
+        
+        # Option to generate a new quiz
+        st.markdown("---")
+        if st.button("🔄 Generate a Different Quiz", use_container_width=True):
+            # Clear quiz data
+            if 'current_quiz' in st.session_state:
+                del st.session_state.current_quiz
+            st.rerun()
+
 def get_score_color(score):
     """Get color based on score"""
     if score >= 90:
@@ -546,3 +761,287 @@ def logout_user():
 
 if __name__ == "__main__":
     render_educator_dashboard()
+
+def render_student_progress_analysis():
+    """Render student progress and analysis dashboard"""
+    st.markdown("## 📊 Student Progress & Analysis")
+    
+    analytics = AnalyticsComponent("http://localhost:8000/api")
+    students_data = analytics.get_students_analytics()
+    
+    if not students_data:
+        st.info("👥 No student data available yet. Students need to take quizzes to generate analytics.")
+        st.markdown("""
+        ### Getting Started
+        1. Go to the **Quiz Assignment** page
+        2. Create and assign quizzes to students
+        3. Once students complete quizzes, their progress will appear here
+        """)
+        return
+    
+    # Overall class metrics
+    col1, col2, col3 = st.columns(3)
+    
+    total_students = len(students_data)
+    active_students = len([s for s in students_data if s['total_quizzes'] > 0])
+    total_quizzes = sum([s['total_quizzes'] for s in students_data])
+    class_avg = sum([s['average_score'] for s in students_data if s['total_quizzes'] > 0]) / active_students if active_students > 0 else 0
+    
+    with col1:
+        st.metric("👥 Total Students", total_students)
+    
+    with col2:
+        st.metric("📝 Total Quizzes Taken", total_quizzes)
+    
+    with col3:
+        st.metric("📊 Class Average Score", f"{class_avg:.1f}%")
+    
+    # Student list
+    st.markdown("### 👥 Student Progress")
+    
+    # Add a search box for filtering students
+    search = st.text_input("🔍 Search Students", placeholder="Filter by name or email...")
+    
+    # Filter and display students
+    filtered_students = students_data
+    if search:
+        filtered_students = [s for s in students_data if search.lower() in s['name'].lower() or search.lower() in s['email'].lower()]
+    
+    if not filtered_students:
+        st.warning("No students match your search criteria.")
+    
+    for student in filtered_students:
+        with st.expander(f"👤 {student['name']} ({student['email']})"):
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("📚 Quizzes Taken", student['total_quizzes'])
+            with col2:
+                st.metric("📊 Average Score", f"{student['average_score']:.1f}%")
+            with col3:
+                st.metric("⬆️ Highest Score", f"{student['highest_score']:.1f}%")
+            with col4:
+                st.metric("⬇️ Lowest Score", f"{student['lowest_score']:.1f}%")
+            
+            # Score progression chart
+            if student['quiz_history']:
+                st.markdown("#### 📈 Score Progression")
+                scores = [q['score'] for q in student['quiz_history']]
+                dates = [q['submitted_at'][:10] for q in student['quiz_history']]
+                
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=dates, 
+                    y=scores,
+                    mode='lines+markers',
+                    name='Score'
+                ))
+                fig.update_layout(
+                    title=f"{student['name']}'s Score Progression",
+                    xaxis_title="Date",
+                    yaxis_title="Score (%)",
+                    height=300
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Topic performance
+                st.markdown("#### 📚 Performance by Topic")
+                topic_scores = {}
+                for quiz in student['quiz_history']:
+                    topic = quiz['topic']
+                    if topic not in topic_scores:
+                        topic_scores[topic] = []
+                    topic_scores[topic].append(quiz['score'])
+                
+                if topic_scores:
+                    topic_avg = {topic: sum(scores)/len(scores) for topic, scores in topic_scores.items()}
+                    
+                    fig = px.bar(
+                        x=list(topic_avg.keys()),
+                        y=list(topic_avg.values()),
+                        title=f"{student['name']}'s Average Score by Topic",
+                        labels={'x': 'Topic', 'y': 'Average Score (%)'},
+                        color=list(topic_avg.values()),
+                        color_continuous_scale='RdYlGn'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Detailed quiz history
+                st.markdown("#### 📝 Detailed Quiz History")
+                history_df = pd.DataFrame(student['quiz_history'])
+                history_df['submitted_at'] = pd.to_datetime(history_df['submitted_at']).dt.strftime('%Y-%m-%d %H:%M')
+                
+                st.dataframe(
+                    history_df[['topic', 'difficulty', 'score', 'correct_answers', 'total_questions', 'submitted_at']],
+                    use_container_width=True
+                )
+
+def render_quiz_history():
+    """Render quiz history for educator"""
+    st.markdown("## 📚 Quiz History")
+    st.markdown("View all quizzes created and assigned to students")
+    
+    analytics = AnalyticsComponent("http://localhost:8000/api")
+    students_data = analytics.get_students_analytics()
+    
+    if not students_data:
+        st.info("No quiz history available yet. Quizzes will appear here after they are created and assigned.")
+        return
+    
+    # Get all unique quizzes from student histories
+    all_quizzes = {}
+    quiz_completion_data = {}
+    
+    for student in students_data:
+        if student['quiz_history']:
+            for quiz in student['quiz_history']:
+                quiz_id = quiz.get('quiz_id')
+                if quiz_id not in all_quizzes:
+                    all_quizzes[quiz_id] = {
+                        'quiz_id': quiz_id,
+                        'topic': quiz.get('topic', 'Unknown'),
+                        'difficulty': quiz.get('difficulty', 'Unknown'),
+                        'created_at': quiz.get('created_at', 'Unknown'),
+                        'total_submissions': 0,
+                        'avg_score': 0,
+                        'completion_rate': 0
+                    }
+                    quiz_completion_data[quiz_id] = {
+                        'submissions': 0,
+                        'total_score': 0,
+                        'students': set()
+                    }
+                
+                # Update quiz stats
+                quiz_completion_data[quiz_id]['submissions'] += 1
+                quiz_completion_data[quiz_id]['total_score'] += quiz.get('score', 0)
+                quiz_completion_data[quiz_id]['students'].add(student['id'])
+    
+    # Calculate averages and format the data
+    for quiz_id, data in quiz_completion_data.items():
+        if data['submissions'] > 0:
+            all_quizzes[quiz_id]['total_submissions'] = data['submissions']
+            all_quizzes[quiz_id]['avg_score'] = data['total_score'] / data['submissions']
+            all_quizzes[quiz_id]['completion_rate'] = len(data['students'])
+    
+    # Convert to list and sort by date (newest first)
+    quiz_list = list(all_quizzes.values())
+    quiz_list.sort(key=lambda x: x['created_at'], reverse=True)
+    
+    # Display quiz history
+    if not quiz_list:
+        st.info("No completed quizzes found. Quizzes will appear here after students complete them.")
+        return
+    
+    # Show filters
+    col1, col2 = st.columns(2)
+    with col1:
+        topic_filter = st.multiselect(
+            "Filter by Topic",
+            options=sorted(set(q['topic'] for q in quiz_list)),
+            default=[]
+        )
+    
+    with col2:
+        difficulty_filter = st.multiselect(
+            "Filter by Difficulty",
+            options=sorted(set(q['difficulty'] for q in quiz_list)),
+            default=[]
+        )
+    
+    # Apply filters
+    filtered_quizzes = quiz_list
+    if topic_filter:
+        filtered_quizzes = [q for q in filtered_quizzes if q['topic'] in topic_filter]
+    if difficulty_filter:
+        filtered_quizzes = [q for q in filtered_quizzes if q['difficulty'] in difficulty_filter]
+    
+    # Display quiz cards
+    st.markdown("### 📝 Quiz List")
+    
+    if not filtered_quizzes:
+        st.warning("No quizzes match the selected filters.")
+    else:
+        # Convert to DataFrame for easier display
+        df = pd.DataFrame(filtered_quizzes)
+        if 'created_at' in df.columns:
+            df['created_at'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+        
+        # Format columns
+        if 'avg_score' in df.columns:
+            df['avg_score'] = df['avg_score'].apply(lambda x: f"{x:.1f}%")
+        
+        # Rename columns for better display
+        columns_to_display = {
+            'topic': 'Topic',
+            'difficulty': 'Difficulty',
+            'created_at': 'Created At',
+            'total_submissions': 'Submissions',
+            'avg_score': 'Avg. Score',
+            'completion_rate': 'Students Completed'
+        }
+        
+        df_display = df.rename(columns=columns_to_display)
+        column_order = [col for col in columns_to_display.values() if col in df_display.columns]
+        
+        st.dataframe(
+            df_display[column_order],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Add detail view for selected quiz
+        if 'quiz_id' in df.columns:
+            selected_quiz_id = st.selectbox(
+                "Select a quiz to view details",
+                options=df['quiz_id'].tolist(),
+                format_func=lambda x: f"{df[df['quiz_id'] == x]['topic'].iloc[0]} - {df[df['quiz_id'] == x]['difficulty'].iloc[0]}"
+            )
+            
+            if selected_quiz_id:
+                st.markdown("### 📊 Quiz Details")
+                
+                # Find all students who took this quiz
+                students_who_completed = []
+                for student in students_data:
+                    for quiz in student.get('quiz_history', []):
+                        if quiz.get('quiz_id') == selected_quiz_id:
+                            students_who_completed.append({
+                                'student_name': student['name'],
+                                'student_id': student['id'],
+                                'score': quiz.get('score', 0),
+                                'submitted_at': quiz.get('submitted_at', '')
+                            })
+                
+                if students_who_completed:
+                    # Show student performance for this quiz
+                    student_df = pd.DataFrame(students_who_completed)
+                    if 'submitted_at' in student_df.columns:
+                        student_df['submitted_at'] = pd.to_datetime(student_df['submitted_at']).dt.strftime('%Y-%m-%d %H:%M')
+                    
+                    student_df = student_df.rename(columns={
+                        'student_name': 'Student Name',
+                        'score': 'Score (%)',
+                        'submitted_at': 'Submitted At'
+                    })
+                    
+                    st.dataframe(
+                        student_df[['Student Name', 'Score (%)', 'Submitted At']],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Score distribution chart
+                    scores = [s['score'] for s in students_who_completed]
+                    
+                    fig = px.histogram(
+                        scores,
+                        nbins=10,
+                        title='Distribution of Scores for Selected Quiz',
+                        labels={'value': 'Score (%)', 'count': 'Number of Students'},
+                        color_discrete_sequence=['#11998e']
+                    )
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No students have completed this quiz yet.")

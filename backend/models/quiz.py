@@ -6,8 +6,8 @@ from datetime import datetime
 class QuizQuestion(BaseModel):
     question: str
     options: List[str]
-    correct_answer: str
-    explanation: Optional[str] = None
+    correct_answer: Optional[str] = "A"  # Default to A if not provided
+    explanation: Optional[str] = "No explanation provided."
 
 class Quiz(BaseModel):
     id: Optional[str] = None
@@ -25,7 +25,7 @@ class QuizRequest(BaseModel):
 class QuizSubmission(BaseModel):
     quiz_id: str
     user_id: str
-    answers: Dict[int, str]  # question_index: selected_answer
+    answers: Dict[str, str]  # question_index: selected_option_text
     submitted_at: Optional[datetime] = None
 
 class QuizResult(BaseModel):

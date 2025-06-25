@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 import sys
 import os
@@ -18,6 +19,10 @@ def render_student_dashboard():
         return
     
     user = st.session_state.user
+    
+    # Initialize page selection but don't set default yet
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "📝 Take Quiz"
     
     # Page config
     st.set_page_config(
@@ -64,27 +69,25 @@ def render_student_dashboard():
     # Sidebar navigation
     with st.sidebar:
         st.markdown("### 🧭 Navigation")
-        page = st.radio(
+        current_page = st.radio(
             "Go to:",
-            ["🏠 Dashboard", "📝 Take Quiz", "📊 My Progress", "📚 Quiz History", "⚙️ Settings"],
-            key="student_nav"
+            ["📝 Take Quiz", "📚 Quiz History"],
+            key="nav_radio",
+            index=0 if st.session_state.current_page == "📝 Take Quiz" else 1
         )
+        
+        # Update the current page after the widget is rendered
+        st.session_state.current_page = current_page
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             logout_user()
     
     # Route to different pages
-    if page == "🏠 Dashboard":
-        render_student_home()
-    elif page == "📝 Take Quiz":
+    if st.session_state.current_page == "📝 Take Quiz":
         render_quiz_section()
-    elif page == "📊 My Progress":
-        render_progress_section()
-    elif page == "📚 Quiz History":
+    elif st.session_state.current_page == "📚 Quiz History":
         render_history_section()
-    elif page == "⚙️ Settings":
-        render_settings_section()
 
 def render_student_home():
     """Render student home dashboard"""
@@ -96,6 +99,33 @@ def render_student_home():
     
     # Get user data
     user_id = st.session_state.user['id']
+    
+    # Get assigned quizzes
+    try:
+        response = requests.get(f"http://localhost:8000/api/quiz/assignments/{user_id}")
+        if response.status_code == 200:
+            assignments = response.json().get("assignments", [])
+            
+            if assignments:
+                st.markdown("### 📬 New Assigned Quizzes")
+                for assignment in assignments:
+                    if not assignment.get("completed", False):
+                        with st.expander(f"📝 {assignment['quiz_title']} - {assignment['quiz_topic']}"):
+                            st.markdown(f"**Topic:** {assignment['quiz_topic']}")
+                            st.markdown(f"**Assigned:** {assignment['assigned_at']}")
+                            
+                            if assignment.get("notification_message"):
+                                st.info(assignment["notification_message"])
+                                
+                            if st.button("Take Quiz", key=f"take_{assignment['quiz_id']}"):
+                                st.session_state.current_quiz_id = assignment['quiz_id']
+                                st.rerun()
+        else:
+            st.error("Failed to fetch assigned quizzes")
+    except Exception as e:
+        st.error(f"Error fetching assignments: {e}")
+    
+    # Get quiz history
     history = analytics.get_quiz_history(user_id)
     
     # Quick stats
@@ -145,19 +175,19 @@ def render_student_home():
     
     with col1:
         if st.button("📝 Take New Quiz", use_container_width=True, type="primary"):
-            st.session_state.student_nav = "📝 Take Quiz"
+            st.session_state.current_page = "📝 Take Quiz"
             st.experimental_rerun()
             return
     
     with col2:
-        if st.button("📊 View Progress", use_container_width=True):
-            st.session_state.student_nav = "📊 My Progress"
+        if st.button("📊 View Your Quiz Results", use_container_width=True):
+            st.session_state.current_page = "� Quiz History"
             st.experimental_rerun()
             return
     
     with col3:
         if st.button("📚 Quiz History", use_container_width=True):
-            st.session_state.student_nav = "📚 Quiz History"
+            st.session_state.current_page = "📚 Quiz History"
             st.experimental_rerun()
             return
     
@@ -209,7 +239,7 @@ def render_student_home():
     else:
         st.info("🌟 Welcome to EduTutor AI! Take your first quiz to start your learning journey.")
         if st.button("🚀 Start Your First Quiz", use_container_width=True, type="primary"):
-            st.session_state.student_nav = "📝 Take Quiz"
+            st.session_state.current_page = "📝 Take Quiz"
             st.experimental_rerun()
             return
 
@@ -218,35 +248,66 @@ def render_quiz_section():
     st.markdown("## 📝 Take a Quiz")
     
     quiz_gen = QuizGenerator("http://localhost:8000/api")
+    user_id = st.session_state.user['id']
     
     # Check if there's an active quiz
     if 'current_quiz' not in st.session_state:
         st.session_state.current_quiz = None
     
-    if 'quiz_answers' not in st.session_state:
-        st.session_state.quiz_answers = {}
+    # Get assigned quizzes
+    has_assigned_quizzes = False
+    try:
+        response = requests.get(f"http://localhost:8000/api/quiz/assignments/{user_id}")
+        if response.status_code == 200:
+            assignments = response.json().get("assignments", [])
+            
+            if assignments:
+                has_assigned_quizzes = True
+                st.markdown("### 📬 Available Quizzes")
+                for assignment in assignments:
+                    if not assignment.get("completed", False):
+                        with st.expander(f"📝 {assignment['quiz_title']} - {assignment['quiz_topic']}"):
+                            st.markdown(f"**Topic:** {assignment['quiz_topic']}")
+                            st.markdown(f"**Assigned:** {assignment['assigned_at']}")
+                            
+                            if assignment.get("notification_message"):
+                                st.info(assignment["notification_message"])
+                                
+                            if st.button("Start Quiz", key=f"start_{assignment['quiz_id']}"):
+                                # Get the quiz details
+                                with st.spinner("Loading quiz..."):
+                                    try:
+                                        quiz_response = requests.get(f"http://localhost:8000/api/quiz/{assignment['quiz_id']}")
+                                        if quiz_response.status_code == 200:
+                                            quiz = quiz_response.json()
+                                            st.session_state.current_quiz = quiz
+                                            st.success("✅ Quiz loaded successfully!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to load quiz: {quiz_response.text}")
+                                    except Exception as e:
+                                        st.error(f"Error loading quiz: {str(e)}")
+                                        
+    except Exception as e:
+        st.error(f"Error fetching assignments: {e}")
+        return
+
+    # If no assigned quizzes and no active quiz
+    if not has_assigned_quizzes and st.session_state.current_quiz is None:
+        st.info("📝 No quizzes have been assigned yet. Please wait for your educator to assign quizzes.")
+        return
     
-    if st.session_state.current_quiz is None:
-        # Quiz generation interface
-        quiz_params = quiz_gen.render_quiz_form()
-        
-        if quiz_params:
-            with st.spinner("🤖 Generating your personalized quiz..."):
-                quiz = quiz_gen.generate_quiz(
-                    quiz_params['topic'],
-                    quiz_params['difficulty'],
-                    quiz_params['num_questions']
-                )
-                
-                if quiz:
-                    st.session_state.current_quiz = quiz
-                    st.session_state.quiz_answers = {}
-                    st.success("✅ Quiz generated successfully!")
-                    st.rerun()
-    
-    else:
-        # Quiz interface
+    # Display active quiz interface
+    if st.session_state.current_quiz:
         quiz = st.session_state.current_quiz
+        
+        # Add a back button to return to quiz list
+        if st.button("← Back to Quiz List"):
+            st.session_state.current_quiz = None
+            st.rerun()
+            return
+        
+        # Render quiz interface and handle submission
         answers = quiz_gen.render_quiz_interface(quiz)
         
         if answers:
@@ -260,13 +321,38 @@ def render_quiz_section():
                 if result:
                     st.session_state.quiz_result = result
                     st.session_state.current_quiz = None
-                    st.session_state.quiz_answers = {}
                     st.rerun()
     
     # Display quiz result
     if 'quiz_result' in st.session_state:
-        quiz_gen.render_quiz_result(st.session_state.quiz_result)
+        st.markdown("---")
+        st.markdown("### 📊 Quiz Results")
         
+        result = st.session_state.quiz_result
+        score = result.get('score', 0)
+        correct = result.get('correct_answers', 0)
+        total = result.get('total_questions', 0)
+        
+        # Display score with appropriate color
+        score_color = get_score_color(score)
+        st.markdown(f"""
+        <div style="text-align: center; padding: 2rem; background-color: {score_color}25; border-radius: 10px; margin: 1rem 0;">
+            <h1 style="color: {score_color};">{score:.1f}%</h1>
+            <p>You got {correct} out of {total} questions correct!</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display feedback if available
+        if 'feedback' in result:
+            st.markdown("### 📝 Detailed Feedback")
+            for i, feedback in enumerate(result['feedback']):
+                with st.expander(f"Question {i+1}"):
+                    st.markdown(feedback)
+        
+        # Show that this quiz is now part of their history
+        st.success("✅ This quiz has been added to your quiz history!")
+        
+        # Action buttons
         col1, col2 = st.columns(2)
         with col1:
             if st.button("📝 Take Another Quiz", use_container_width=True, type="primary"):
@@ -274,110 +360,72 @@ def render_quiz_section():
                 st.rerun()
         
         with col2:
-            if st.button("📊 View Progress", use_container_width=True):
+            if st.button("📊 View Quiz History", use_container_width=True):
                 del st.session_state.quiz_result
-                st.session_state.student_nav = "📊 My Progress"
+                st.session_state.current_page = "📚 Quiz History"
                 st.rerun()
 
-def render_progress_section():
-    """Render progress analytics section"""
-    st.markdown("## 📊 Your Learning Progress")
-    
-    analytics = AnalyticsComponent("http://localhost:8000/api")
-    analytics.render_student_analytics(st.session_state.user['id'])
+# Progress section removed as we simplified the navigation
 
 def render_history_section():
     """Render quiz history section"""
     st.markdown("## 📚 Quiz History")
     
+    # Add refresh button
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+    
     analytics = AnalyticsComponent("http://localhost:8000/api")
     history = analytics.get_quiz_history(st.session_state.user['id'])
     
     if history:
-        # Filters
-        col1, col2, col3 = st.columns(3)
+        st.markdown("### Your Completed Quizzes")
+        st.info(f"📊 You have completed {len(history)} quiz(s) so far!")
         
-        with col1:
-            topics = list(set([q['topic'] for q in history]))
-            selected_topic = st.selectbox("Filter by Topic", ["All Topics"] + topics)
+        # Create a nice table of all quizzes
+        quiz_data = []
+        for quiz in history:
+            quiz_data.append({
+                "Topic": quiz['topic'],
+                "Date": quiz['submitted_at'][:10],
+                "Score": f"{quiz['score']:.1f}%",
+                "Correct": f"{quiz['correct_answers']}/{quiz['total_questions']}",
+                "Difficulty": "⭐" * quiz['difficulty']
+            })
         
-        with col2:
-            difficulties = list(set([q['difficulty'] for q in history]))
-            selected_difficulty = st.selectbox("Filter by Difficulty", ["All Levels"] + sorted(difficulties))
+        if quiz_data:
+            df = pd.DataFrame(quiz_data)
+            st.dataframe(df, use_container_width=True)
         
-        with col3:
-            date_range = st.selectbox("Date Range", ["All Time", "Last 7 days", "Last 30 days", "Last 90 days"])
-        
-        # Apply filters
-        filtered_history = apply_filters(history, selected_topic, selected_difficulty, date_range)
-        
-        # Display filtered history
-        for quiz in filtered_history:
-            score_color = get_score_color(quiz['score'])
-            difficulty_stars = '⭐' * quiz['difficulty']
-            
-            with st.expander(f"{quiz['topic']} - {quiz['score']:.1f}% ({quiz['submitted_at'][:10]})"):
-                col1, col2, col3, col4 = st.columns(4)
+        # Display detailed history
+        st.markdown("### Detailed Results")
+        for i, quiz in enumerate(history):
+            with st.expander(f"Quiz {i+1}: {quiz['topic']} - {quiz['submitted_at'][:10]}"):
+                # Create score display
+                score_color = "#28a745" if quiz['score'] >= 80 else "#ffc107" if quiz['score'] >= 60 else "#dc3545"
+                st.markdown(f"""
+                <div style="text-align: center; padding: 1rem; background-color: {score_color}25; 
+                            border-radius: 10px; margin-bottom: 1rem;">
+                    <h1 style="color: {score_color};">{quiz['score']:.1f}%</h1>
+                    <p>Score: {quiz['correct_answers']} correct out of {quiz['total_questions']} questions</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                with col1:
-                    st.metric("Score", f"{quiz['score']:.1f}%")
-                with col2:
-                    st.metric("Correct", f"{quiz['correct_answers']}/{quiz['total_questions']}")
-                with col3:
-                    st.metric("Difficulty", difficulty_stars)
-                with col4:
-                    st.metric("Date", quiz['submitted_at'][:10])
+                # Show feedback if available
+                if 'feedback' in quiz:
+                    st.markdown("#### Question Feedback")
+                    for feedback_item in quiz['feedback']:
+                        st.markdown(f"- {feedback_item}")
     
     else:
         st.info("📚 No quiz history found. Take some quizzes to build your learning history!")
+        if st.button("🚀 Take Your First Quiz", use_container_width=True, type="primary"):
+            st.session_state.current_page = "📝 Take Quiz"
+            st.rerun()
 
-def render_settings_section():
-    """Render settings section"""
-    st.markdown("## ⚙️ Settings")
-    
-    user = st.session_state.user
-    
-    # Profile settings
-    st.markdown("### 👤 Profile Settings")
-    with st.form("profile_form"):
-        name = st.text_input("Name", value=user.get('name', ''))
-        email = st.text_input("Email", value=user.get('email', ''), disabled=True)
-        
-        if st.form_submit_button("💾 Save Changes"):
-            st.session_state.user['name'] = name
-            st.success("✅ Profile updated successfully!")
-    
-    # Learning preferences
-    st.markdown("### 🎯 Learning Preferences")
-    with st.form("preferences_form"):
-        preferred_difficulty = st.slider("Preferred Difficulty Level", 1, 5, 3)
-        preferred_topics = st.multiselect(
-            "Favorite Topics",
-            ["Mathematics", "Science", "History", "Literature", "Programming", "Languages"],
-            default=["Mathematics", "Science"]
-        )
-        quiz_length = st.selectbox("Preferred Quiz Length", [5, 10, 15, 20])
-        
-        if st.form_submit_button("💾 Save Preferences"):
-            st.success("✅ Preferences saved successfully!")
-    
-    # Data export
-    st.markdown("### 📊 Data Export")
-    if st.button("📥 Export Quiz History", use_container_width=True):
-        analytics = AnalyticsComponent("http://localhost:8000/api")
-        history = analytics.get_quiz_history(st.session_state.user['id'])
-        
-        if history:
-            df = pd.DataFrame(history)
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="💾 Download CSV",
-                data=csv,
-                file_name=f"quiz_history_{user['name'].replace(' ', '_')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No data to export")
+# Settings section removed as we simplified the navigation
 
 def calculate_learning_streak(history):
     """Calculate learning streak in days"""

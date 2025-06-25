@@ -9,17 +9,25 @@ class AuthHandler:
     def login(self, email: str, password: str):
         """Authenticate user and store token in session state."""
         try:
+            st.write(f"Attempting to log in with email: {email}")
             response = requests.post(
                 f"{self.api_base_url}/auth/login",
                 json={"email": email, "password": password}
             )
+            st.write(f"Login response status: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 st.session_state["access_token"] = data.get("access_token")
-                # Return the user data dictionary on success
-                return data.get("user") # Return only the user dict
+                st.session_state["user"] = data.get("user")
+                # Return the complete data with user and token
+                return data
             else:
-                st.error("Login failed: " + response.text)
+                try:
+                    error_detail = response.json()
+                    st.error(f"Login failed: {error_detail}")
+                except:
+                    st.error(f"Login failed: {response.text}")
                 # Return None on failure
                 return None
         except Exception as e:
