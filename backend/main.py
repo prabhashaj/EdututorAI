@@ -46,7 +46,7 @@ def init_predefined_users():
     student_password_hash = pwd_context.hash("student123")
     educator_password_hash = pwd_context.hash("educator123")
     
-    # Add student user
+    # Add original student user
     users_db["student_id"] = {
         "id": "student_id",
         "email": "student@edututor.ai",
@@ -54,6 +54,34 @@ def init_predefined_users():
         "role": "student",
         "hashed_password": student_password_hash
     }
+    
+    # Add more student users
+    students = [
+        {"id": "student_alice", "email": "alice.johnson@edututor.ai", "name": "Alice Johnson"},
+        {"id": "student_bob", "email": "bob.smith@edututor.ai", "name": "Bob Smith"},
+        {"id": "student_carol", "email": "carol.williams@edututor.ai", "name": "Carol Williams"},
+        {"id": "student_david", "email": "david.brown@edututor.ai", "name": "David Brown"},
+        {"id": "student_emma", "email": "emma.davis@edututor.ai", "name": "Emma Davis"},
+        {"id": "student_frank", "email": "frank.miller@edututor.ai", "name": "Frank Miller"},
+        {"id": "student_grace", "email": "grace.wilson@edututor.ai", "name": "Grace Wilson"},
+        {"id": "student_henry", "email": "henry.moore@edututor.ai", "name": "Henry Moore"},
+        {"id": "student_ivy", "email": "ivy.taylor@edututor.ai", "name": "Ivy Taylor"},
+        {"id": "student_jack", "email": "jack.anderson@edututor.ai", "name": "Jack Anderson"},
+        {"id": "student_kate", "email": "kate.thomas@edututor.ai", "name": "Kate Thomas"},
+        {"id": "student_luke", "email": "luke.jackson@edututor.ai", "name": "Luke Jackson"},
+        {"id": "student_maria", "email": "maria.white@edututor.ai", "name": "Maria White"},
+        {"id": "student_noah", "email": "noah.harris@edututor.ai", "name": "Noah Harris"},
+        {"id": "student_olivia", "email": "olivia.martin@edututor.ai", "name": "Olivia Martin"}
+    ]
+    
+    for student in students:
+        users_db[student["id"]] = {
+            "id": student["id"],
+            "email": student["email"],
+            "name": student["name"],
+            "role": "student",
+            "hashed_password": student_password_hash
+        }
     
     # Add educator user
     users_db["educator_id"] = {
@@ -71,6 +99,25 @@ def init_predefined_users():
 
 # Initialize users on startup
 init_predefined_users()
+
+# Also initialize users in database for persistence
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database users on startup"""
+    try:
+        import requests
+        # Wait a moment for the server to start
+        import asyncio
+        await asyncio.sleep(1)
+        
+        # Initialize users in database
+        response = requests.post("http://localhost:8000/api/auth/init-db-users")
+        if response.status_code == 200:
+            print("✅ Database users initialized successfully")
+        else:
+            print(f"⚠️ Failed to initialize database users: {response.text}")
+    except Exception as e:
+        print(f"⚠️ Could not initialize database users: {e}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

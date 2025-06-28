@@ -226,3 +226,57 @@ async def create_demo_users():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create demo users: {str(e)}")
+
+@router.post("/init-db-users")
+async def initialize_database_users():
+    """Initialize predefined users in the database (for demo purposes)"""
+    try:
+        from routers.auth import users_db, pwd_context
+        from db import SessionLocal, UserDB
+        
+        db = SessionLocal()
+        try:
+            # Add all predefined users to the database
+            for user_id, user_data in users_db.items():
+                # Check if user already exists in database
+                existing = db.query(UserDB).filter(UserDB.email == user_data["email"]).first()
+                if not existing:
+                    db_user = UserDB(
+                        id=user_data["id"],
+                        email=user_data["email"],
+                        name=user_data["name"],
+                        role=user_data["role"],
+                        hashed_password=user_data["hashed_password"]
+                    )
+                    db.add(db_user)
+            
+            db.commit()
+            return {"message": f"Successfully initialized {len(users_db)} users in database"}
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        db.close()
+        raise HTTPException(status_code=500, detail=f"Failed to initialize users in database: {str(e)}")
+
+@router.get("/demo-students")
+async def get_demo_students():
+    """Get demo student accounts for quick login (for development)"""
+    try:
+        from routers.auth import users_db
+        
+        students = []
+        for user_id, user_data in users_db.items():
+            if user_data.get("role") == "student":
+                students.append({
+                    "id": user_id,
+                    "name": user_data.get("name"),
+                    "email": user_data.get("email"),
+                    "password": "student123"  # Demo password for quick login
+                })
+        
+        return {"students": students}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get demo students: {str(e)}")

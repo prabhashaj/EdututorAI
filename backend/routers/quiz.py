@@ -16,6 +16,8 @@ gemini_service = GeminiService(api_key=settings.gemini_api_key)
 # In-memory storage for demo (use database in production)
 quiz_storage = {}
 quiz_results = {}
+quiz_generation_history = {}  # Track when quizzes are generated
+assignment_history = {}  # Track quiz assignments
 
 @router.post("/generate", response_model=Quiz)
 async def generate_quiz(request: QuizRequest):
@@ -48,6 +50,18 @@ async def generate_quiz(request: QuizRequest):
         
         # Store quiz
         quiz_storage[quiz_id] = quiz
+        
+        # Log quiz generation for history tracking
+        quiz_generation_history[quiz_id] = {
+            "quiz_id": quiz_id,
+            "title": quiz.title,
+            "topic": quiz.topic,
+            "difficulty": quiz.difficulty,
+            "num_questions": len(quiz.questions),
+            "created_at": datetime.now().isoformat(),
+            "created_by": "educator_id",  # In real app, this would be the current user
+            "status": "generated"
+        }
         
         # Return quiz without correct answers for frontend
         quiz_for_frontend = quiz.dict()
@@ -175,6 +189,25 @@ async def assign_quiz(assignment: dict):
             "assigned_at": datetime.now().isoformat()
         }
         
+        # Log assignment for history tracking
+        assignment_history[assignment_id] = {
+            "assignment_id": assignment_id,
+            "quiz_id": quiz_id,
+            "quiz_title": quiz.title,
+            "quiz_topic": quiz.topic,
+            "student_count": len(student_ids),
+            "student_ids": student_ids,
+            "notification_message": notification_message,
+            "assigned_at": datetime.now().isoformat(),
+            "assigned_by": "educator_id"  # In real app, this would be the current user
+        }
+        
+        # Update quiz generation history status
+        if quiz_id in quiz_generation_history:
+            quiz_generation_history[quiz_id]["status"] = "assigned"
+            quiz_generation_history[quiz_id]["assigned_at"] = datetime.now().isoformat()
+            quiz_generation_history[quiz_id]["student_count"] = len(student_ids)
+        
         # Store for each student
         for student_id in student_ids:
             if student_id not in assign_quiz.student_assignments:
@@ -189,6 +222,14 @@ async def assign_quiz(assignment: dict):
                 "assigned_at": datetime.now().isoformat(),
                 "completed": False
             })
+        
+        # Track assignment history
+        assignment_history[assignment_id] = {
+            "quiz_id": quiz_id,
+            "student_ids": student_ids,
+            "notification_message": notification_message,
+            "assigned_at": datetime.now().isoformat()
+        }
         
         return {"message": f"Quiz assigned to {len(student_ids)} students", "assignment_id": assignment_id}
         
@@ -237,8 +278,54 @@ async def get_quiz_history(user_id: str):
 async def get_students_analytics():
     """Get analytics for all students (educator view)"""
     try:
-        students_data = await pinecone_service.get_all_students_data()
-        return {"students": students_data}
+        from routers.auth import users_db
+        
+        students_analytics = []
+        
+        # Get all students from users_db
+        for user_id, user_data in users_db.items():
+            if user_data.get("role") == "student":
+                # Get quiz results for this student
+                student_results = []
+                student_scores = []
+                
+                for result_id, result in quiz_results.items():
+                    if result.user_id == user_id:
+                        quiz = quiz_storage.get(result.quiz_id)
+                        if quiz:
+                            student_results.append({
+                                "quiz_id": result.quiz_id,
+                                "topic": quiz.topic,
+                                "difficulty": quiz.difficulty,
+                                "score": result.score,
+                                "submitted_at": result.submitted_at.isoformat(),
+                                "total_questions": result.total_questions,
+                                "correct_answers": result.correct_answers
+                            })
+                            student_scores.append(result.score)
+                
+                # Calculate analytics
+                total_quizzes = len(student_results)
+                average_score = sum(student_scores) / len(student_scores) if student_scores else 0
+                highest_score = max(student_scores) if student_scores else 0
+                lowest_score = min(student_scores) if student_scores else 0
+                
+                # Sort quiz history by date (newest first)
+                student_results.sort(key=lambda x: x['submitted_at'], reverse=True)
+                
+                students_analytics.append({
+                    "user_id": user_id,
+                    "name": user_data.get("name"),
+                    "email": user_data.get("email"),
+                    "total_quizzes": total_quizzes,
+                    "average_score": average_score,
+                    "highest_score": highest_score,
+                    "lowest_score": lowest_score,
+                    "quiz_history": student_results
+                })
+        
+        return {"students": students_analytics}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
 
@@ -254,26 +341,6 @@ async def get_student_assignments(student_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get assignments: {str(e)}")
-
-@router.get("/{quiz_id}")
-async def get_quiz_by_id(quiz_id: str):
-    """Get quiz by ID"""
-    try:
-        if quiz_id not in quiz_storage:
-            raise HTTPException(status_code=404, detail="Quiz not found")
-        
-        quiz = quiz_storage[quiz_id]
-        
-        # Create a copy of the quiz that doesn't include correct answers
-        quiz_for_frontend = quiz.dict()
-        for question in quiz_for_frontend["questions"]:
-            question.pop("correct_answer", None)
-            question.pop("explanation", None)
-        
-        return quiz_for_frontend
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve quiz: {str(e)}")
 
 @router.get("/list")
 async def list_quizzes():
@@ -319,3 +386,79 @@ async def list_assignments():
         return {"assignments": assignments}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list assignments: {str(e)}")
+
+@router.get("/{quiz_id}")
+async def get_quiz_by_id(quiz_id: str):
+    """Get quiz by ID"""
+    try:
+        if quiz_id not in quiz_storage:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+        
+        quiz = quiz_storage[quiz_id]
+        
+        # Create a copy of the quiz that doesn't include correct answers
+        quiz_for_frontend = quiz.dict()
+        for question in quiz_for_frontend["questions"]:
+            question.pop("correct_answer", None)
+            question.pop("explanation", None)
+        
+        return quiz_for_frontend
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve quiz: {str(e)}")
+
+@router.get("/history/educator")
+async def get_educator_quiz_history():
+    """Get quiz generation and assignment history for educators"""
+    try:
+        history = []
+        
+        # Get all quiz generation history
+        for quiz_id, quiz_info in quiz_generation_history.items():
+            quiz = quiz_storage.get(quiz_id)
+            if quiz:
+                # Get assignment info if exists
+                assignment_info = None
+                for assignment_id, assignment in assignment_history.items():
+                    if assignment["quiz_id"] == quiz_id:
+                        assignment_info = assignment
+                        break
+                
+                # Get completion statistics
+                total_assigned = quiz_info.get("student_count", 0) if quiz_info.get("status") == "assigned" else 0
+                completed_count = 0
+                total_score = 0
+                
+                if total_assigned > 0:
+                    for result_id, result in quiz_results.items():
+                        if result.quiz_id == quiz_id:
+                            completed_count += 1
+                            total_score += result.score
+                
+                average_score = (total_score / completed_count) if completed_count > 0 else 0
+                completion_rate = (completed_count / total_assigned * 100) if total_assigned > 0 else 0
+                
+                history_item = {
+                    "quiz_id": quiz_id,
+                    "title": quiz_info["title"],
+                    "topic": quiz_info["topic"],
+                    "difficulty": quiz_info["difficulty"],
+                    "num_questions": quiz_info["num_questions"],
+                    "created_at": quiz_info["created_at"],
+                    "status": quiz_info["status"],
+                    "assigned_at": quiz_info.get("assigned_at"),
+                    "total_assigned": total_assigned,
+                    "completed_count": completed_count,
+                    "completion_rate": completion_rate,
+                    "average_score": average_score,
+                    "assignment_message": assignment_info["notification_message"] if assignment_info else "",
+                }
+                history.append(history_item)
+        
+        # Sort by creation date (newest first)
+        history.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return {"history": history}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get educator quiz history: {str(e)}")

@@ -4,7 +4,7 @@ from typing import List, Dict
 import json
 
 from services.classroom_service import ClassroomService
-from routers.auth import get_current_user
+from routers.auth import get_current_user, users_db
 from models.user import User
 
 router = APIRouter()
@@ -58,6 +58,31 @@ async def get_courses(current_user: User = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get courses: {str(e)}")
 
+@router.get("/students")
+async def get_all_students(current_user: User = Depends(get_current_user)):
+    """Get all students in the system (for educators to assign quizzes)"""
+    try:
+        # Only allow educators to access this endpoint
+        if current_user.get("role") != "educator":
+            raise HTTPException(status_code=403, detail="Only educators can access student list")
+        
+        # Get all students from users_db
+        students = []
+        for user_id, user_data in users_db.items():
+            if user_data.get("role") == "student":
+                students.append({
+                    "userId": user_id,
+                    "profile": {
+                        "name": {"fullName": user_data.get("name")},
+                        "emailAddress": user_data.get("email")
+                    }
+                })
+        
+        return {"students": students}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get students: {str(e)}")
+
 @router.get("/courses/{course_id}/students")
 async def get_course_students(
     course_id: str,
@@ -65,25 +90,19 @@ async def get_course_students(
 ):
     """Get students in a course"""
     try:
-        # Mock student data
-        mock_students = [
-            {
-                "userId": "student_1",
-                "profile": {
-                    "name": {"fullName": "Alice Johnson"},
-                    "emailAddress": "alice@example.com"
-                }
-            },
-            {
-                "userId": "student_2",
-                "profile": {
-                    "name": {"fullName": "Bob Smith"},
-                    "emailAddress": "bob@example.com"
-                }
-            }
-        ]
+        # Get all students from users_db instead of mock data
+        students = []
+        for user_id, user_data in users_db.items():
+            if user_data.get("role") == "student":
+                students.append({
+                    "userId": user_id,
+                    "profile": {
+                        "name": {"fullName": user_data.get("name")},
+                        "emailAddress": user_data.get("email")
+                    }
+                })
         
-        return {"students": mock_students}
+        return {"students": students}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get students: {str(e)}")

@@ -87,6 +87,28 @@ class QuizGenerator:
             st.error(f"Quiz assignment error: {str(e)}")
             return False
     
+    def get_students(self, access_token: str) -> Optional[List[Dict]]:
+        """Get list of all students for assignment"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {access_token}"
+            }
+            response = requests.get(
+                f"{self.api_base_url}/classroom/students",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("students", [])
+            else:
+                st.error(f"Failed to get students: {response.text}")
+                return None
+                
+        except Exception as e:
+            st.error(f"Error getting students: {str(e)}")
+            return None
+    
     def render_quiz_form(self) -> Optional[Dict]:
         """Render quiz generation form"""
         with st.form("quiz_generation_form"):

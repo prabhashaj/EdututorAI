@@ -699,15 +699,39 @@ def render_quiz_assignment():
             help="This message will be shown to students when they see the assigned quiz"
         )
         
-        # Student selection (hardcoded for demo)
+        # Student selection from backend
         st.markdown("**Select Students:**")
-        students = [
-            {"id": "student_id", "name": "Student User", "email": "student@edututor.ai"}
-        ]
+        
+        # Get students from backend
+        students = []
+        if 'access_token' in st.session_state:
+            students_data = quiz_gen.get_students(st.session_state.access_token)
+            if students_data:
+                students = []
+                for student in students_data:
+                    students.append({
+                        "id": student["userId"],
+                        "name": student["profile"]["name"]["fullName"],
+                        "email": student["profile"]["emailAddress"]
+                    })
+        
+        if not students:
+            # Fallback to hardcoded student for demo
+            students = [
+                {"id": "student_id", "name": "Student User", "email": "student@edututor.ai"}
+            ]
         
         selected_students = []
+        
+        # Show "Select All" option
+        select_all = st.checkbox("✅ Select All Students", key="select_all_students")
+        
+        # Individual student checkboxes
         for student in students:
-            if st.checkbox(f"✅ {student['name']} ({student['email']})", value=True, key=f"student_{student['id']}"):
+            default_value = select_all  # If select all is checked, default to True
+            if st.checkbox(f"✅ {student['name']} ({student['email']})", 
+                          value=default_value, 
+                          key=f"student_{student['id']}"):
                 selected_students.append(student['id'])
         
         # Assignment button
@@ -759,9 +783,6 @@ def logout_user():
         del st.session_state[key]
     st.rerun()
 
-if __name__ == "__main__":
-    render_educator_dashboard()
-
 def render_student_progress_analysis():
     """Render student progress and analysis dashboard"""
     st.markdown("## 📊 Student Progress & Analysis")
@@ -779,113 +800,374 @@ def render_student_progress_analysis():
         """)
         return
     
+    # Separate active and inactive students
+    active_students = [s for s in students_data if s['total_quizzes'] > 0]
+    inactive_students = [s for s in students_data if s['total_quizzes'] == 0]
+    
     # Overall class metrics
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     total_students = len(students_data)
-    active_students = len([s for s in students_data if s['total_quizzes'] > 0])
+    num_active_students = len(active_students)
     total_quizzes = sum([s['total_quizzes'] for s in students_data])
-    class_avg = sum([s['average_score'] for s in students_data if s['total_quizzes'] > 0]) / active_students if active_students > 0 else 0
+    class_avg = sum([s['average_score'] for s in active_students]) / len(active_students) if active_students else 0
     
     with col1:
-        st.metric("👥 Total Students", total_students)
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; color: white; text-align: center;">
+            <h3>👥 Total Students</h3>
+            <h2>{}</h2>
+        </div>
+        """.format(total_students), unsafe_allow_html=True)
     
     with col2:
-        st.metric("📝 Total Quizzes Taken", total_quizzes)
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%); padding: 1rem; border-radius: 10px; color: white; text-align: center;">
+            <h3>🎯 Active Students</h3>
+            <h2>{}</h2>
+        </div>
+        """.format(num_active_students), unsafe_allow_html=True)
     
     with col3:
-        st.metric("📊 Class Average Score", f"{class_avg:.1f}%")
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); padding: 1rem; border-radius: 10px; color: white; text-align: center;">
+            <h3>📝 Total Quizzes</h3>
+            <h2>{}</h2>
+        </div>
+        """.format(total_quizzes), unsafe_allow_html=True)
     
-    # Student list
-    st.markdown("### 👥 Student Progress")
+    with col4:
+        st.markdown("""
+        <div style="background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%); padding: 1rem; border-radius: 10px; color: white; text-align: center;">
+            <h3>📊 Class Average</h3>
+            <h2>{:.1f}%</h2>
+        </div>
+        """.format(class_avg), unsafe_allow_html=True)
     
-    # Add a search box for filtering students
-    search = st.text_input("🔍 Search Students", placeholder="Filter by name or email...")
+    st.markdown("---")
     
-    # Filter and display students
-    filtered_students = students_data
-    if search:
-        filtered_students = [s for s in students_data if search.lower() in s['name'].lower() or search.lower() in s['email'].lower()]
-    
-    if not filtered_students:
-        st.warning("No students match your search criteria.")
-    
-    for student in filtered_students:
-        with st.expander(f"👤 {student['name']} ({student['email']})"):
-            col1, col2, col3, col4 = st.columns(4)
+    # Show performance distribution if there are active students
+    if active_students:
+        st.markdown("### 📈 Class Performance Overview")
+        
+        # Performance distribution
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Score distribution
+            scores = [s['average_score'] for s in active_students]
+            import plotly.express as px
+            import pandas as pd
             
+            fig = px.histogram(
+                scores,
+                nbins=10,
+                title='Score Distribution',
+                labels={'value': 'Average Score (%)', 'count': 'Number of Students'},
+                color_discrete_sequence=['#667eea']
+            )
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Categorize students
+            excellent = len([s for s in active_students if s['average_score'] >= 90])
+            good = len([s for s in active_students if 70 <= s['average_score'] < 90])
+            needs_improvement = len([s for s in active_students if s['average_score'] < 70])
+            
+            fig = px.pie(
+                values=[excellent, good, needs_improvement],
+                names=['Excellent (≥90%)', 'Good (70-89%)', 'Needs Improvement (<70%)'],
+                title='Performance Categories',
+                color_discrete_sequence=['#43e97b', '#f093fb', '#f5576c']
+            )
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Student details
+    st.markdown("### 👥 Individual Student Progress")
+    
+    # Tabs for active and inactive students
+    tab1, tab2 = st.tabs([f"🟢 Active Students ({len(active_students)})", f"🔴 Inactive Students ({len(inactive_students)})"])
+    
+    with tab1:
+        if active_students:
+            # Add sorting options
+            col1, col2 = st.columns([3, 1])
             with col1:
-                st.metric("📚 Quizzes Taken", student['total_quizzes'])
+                search = st.text_input("🔍 Search Students", placeholder="Filter by name or email...")
             with col2:
-                st.metric("📊 Average Score", f"{student['average_score']:.1f}%")
-            with col3:
-                st.metric("⬆️ Highest Score", f"{student['highest_score']:.1f}%")
-            with col4:
-                st.metric("⬇️ Lowest Score", f"{student['lowest_score']:.1f}%")
+                sort_by = st.selectbox("Sort by", ["Name", "Average Score", "Total Quizzes"], key="sort_active")
             
-            # Score progression chart
-            if student['quiz_history']:
-                st.markdown("#### 📈 Score Progression")
-                scores = [q['score'] for q in student['quiz_history']]
-                dates = [q['submitted_at'][:10] for q in student['quiz_history']]
+            # Filter and sort students
+            filtered_students = active_students
+            if search:
+                filtered_students = [s for s in active_students if search.lower() in s['name'].lower() or search.lower() in s['email'].lower()]
+            
+            # Sort students
+            if sort_by == "Average Score":
+                filtered_students.sort(key=lambda x: x['average_score'], reverse=True)
+            elif sort_by == "Total Quizzes":
+                filtered_students.sort(key=lambda x: x['total_quizzes'], reverse=True)
+            else:
+                filtered_students.sort(key=lambda x: x['name'])
+            
+            if not filtered_students:
+                st.warning("No students match your search criteria.")
+            
+            for i, student in enumerate(filtered_students):
+                # Color coding based on performance
+                if student['average_score'] >= 90:
+                    border_color = "#43e97b"
+                elif student['average_score'] >= 70:
+                    border_color = "#f093fb"
+                else:
+                    border_color = "#f5576c"
                 
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=dates, 
-                    y=scores,
-                    mode='lines+markers',
-                    name='Score'
-                ))
-                fig.update_layout(
-                    title=f"{student['name']}'s Score Progression",
-                    xaxis_title="Date",
-                    yaxis_title="Score (%)",
-                    height=300
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Topic performance
-                st.markdown("#### 📚 Performance by Topic")
-                topic_scores = {}
-                for quiz in student['quiz_history']:
-                    topic = quiz['topic']
-                    if topic not in topic_scores:
-                        topic_scores[topic] = []
-                    topic_scores[topic].append(quiz['score'])
-                
-                if topic_scores:
-                    topic_avg = {topic: sum(scores)/len(scores) for topic, scores in topic_scores.items()}
+                with st.container():
+                    st.markdown(f"""
+                    <div style="border-left: 4px solid {border_color}; padding-left: 1rem; margin: 1rem 0;">
+                    """, unsafe_allow_html=True)
                     
-                    fig = px.bar(
-                        x=list(topic_avg.keys()),
-                        y=list(topic_avg.values()),
-                        title=f"{student['name']}'s Average Score by Topic",
-                        labels={'x': 'Topic', 'y': 'Average Score (%)'},
-                        color=list(topic_avg.values()),
-                        color_continuous_scale='RdYlGn'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                # Detailed quiz history
-                st.markdown("#### 📝 Detailed Quiz History")
-                history_df = pd.DataFrame(student['quiz_history'])
-                history_df['submitted_at'] = pd.to_datetime(history_df['submitted_at']).dt.strftime('%Y-%m-%d %H:%M')
-                
-                st.dataframe(
-                    history_df[['topic', 'difficulty', 'score', 'correct_answers', 'total_questions', 'submitted_at']],
-                    use_container_width=True
-                )
+                    with st.expander(f"👤 {student['name']} ({student['email']}) - {student['average_score']:.1f}% avg"):
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("📚 Quizzes Taken", student['total_quizzes'])
+                        with col2:
+                            st.metric("📊 Average Score", f"{student['average_score']:.1f}%")
+                        with col3:
+                            st.metric("⬆️ Highest Score", f"{student['highest_score']:.1f}%")
+                        with col4:
+                            st.metric("⬇️ Lowest Score", f"{student['lowest_score']:.1f}%")
+                        
+                        # Recent quiz history
+                        if student['quiz_history']:
+                            st.markdown("#### � Recent Quiz History")
+                            for quiz in student['quiz_history'][:5]:  # Show last 5 quizzes
+                                score_color = "#43e97b" if quiz['score'] >= 80 else "#f093fb" if quiz['score'] >= 60 else "#f5576c"
+                                st.markdown(f"""
+                                <div style="background: rgba(255,255,255,0.1); padding: 0.5rem; border-radius: 5px; margin: 0.5rem 0;">
+                                    <strong>{quiz['topic']}</strong> (Difficulty: {quiz['difficulty']}/5) 
+                                    <span style="color: {score_color}; font-weight: bold;">{quiz['score']:.1f}%</span>
+                                    <br><small>📅 {quiz['submitted_at'][:10]} | ✅ {quiz['correct_answers']}/{quiz['total_questions']} correct</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("No students have taken quizzes yet.")
+    
+    with tab2:
+        if inactive_students:
+            st.markdown("These students haven't taken any quizzes yet:")
+            
+            # Show inactive students in a simple list
+            for student in inactive_students:
+                st.markdown(f"""
+                <div style="background: rgba(245, 87, 108, 0.1); padding: 1rem; border-radius: 8px; margin: 0.5rem 0; border-left: 4px solid #f5576c;">
+                    <strong>👤 {student['name']}</strong><br>
+                    <small>📧 {student['email']}</small><br>
+                    <small style="color: #f5576c;">⚠️ No quizzes completed</small>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("🎉 All students are active!")
 
 def render_quiz_history():
-    """Render quiz history for educator"""
+    """Render quiz history dashboard"""
     st.markdown("## 📚 Quiz History")
-    st.markdown("View all quizzes created and assigned to students")
+    st.markdown("Track all quizzes you've created and assigned to students.")
     
+    # Get quiz history from backend
+    try:
+        response = requests.get("http://localhost:8000/api/quiz/history/educator")
+        if response.status_code == 200:
+            history_data = response.json().get("history", [])
+            
+            if not history_data:
+                st.info("📝 No quizzes created yet. Go to Quiz Assignment to create your first quiz!")
+                return
+            
+            # Overview metrics
+            st.markdown("### 📊 Overview")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            total_quizzes = len(history_data)
+            assigned_quizzes = len([q for q in history_data if q["status"] == "assigned"])
+            total_students_reached = sum([q.get("total_assigned", 0) for q in history_data])
+            total_completions = sum([q.get("completed_count", 0) for q in history_data])
+            
+            with col1:
+                st.metric("Total Quizzes Created", total_quizzes)
+            with col2:
+                st.metric("Quizzes Assigned", assigned_quizzes)
+            with col3:
+                st.metric("Students Reached", total_students_reached)
+            with col4:
+                st.metric("Total Completions", total_completions)
+            
+            st.markdown("---")
+            
+            # Quiz history table
+            st.markdown("### 📋 Quiz History")
+            
+            # Create tabs for different views
+            tab1, tab2 = st.tabs(["📝 All Quizzes", "📊 Detailed View"])
+            
+            with tab1:
+                # Create a summary table
+                quiz_data = []
+                for quiz in history_data:
+                    quiz_data.append({
+                        "Topic": quiz["topic"],
+                        "Difficulty": f"⭐" * quiz["difficulty"],
+                        "Questions": quiz["num_questions"],
+                        "Status": "✅ Assigned" if quiz["status"] == "assigned" else "📝 Created",
+                        "Created": quiz["created_at"].split("T")[0],
+                        "Assigned To": f"{quiz.get('total_assigned', 0)} students",
+                        "Completed": f"{quiz.get('completed_count', 0)}/{quiz.get('total_assigned', 0)}" if quiz.get('total_assigned', 0) > 0 else "Not assigned",
+                        "Avg Score": f"{quiz.get('average_score', 0):.1f}%" if quiz.get('completed_count', 0) > 0 else "N/A"
+                    })
+                
+                if quiz_data:
+                    df = pd.DataFrame(quiz_data)
+                    st.dataframe(df, use_container_width=True)
+            
+            with tab2:
+                # Detailed view with expandable cards
+                for i, quiz in enumerate(history_data):
+                    with st.expander(f"� {quiz['topic']} - {quiz['title']} (Created: {quiz['created_at'].split('T')[0]})"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**Quiz Details:**")
+                            st.write(f"• **Topic:** {quiz['topic']}")
+                            st.write(f"• **Difficulty:** {'⭐' * quiz['difficulty']} ({quiz['difficulty']}/5)")
+                            st.write(f"• **Questions:** {quiz['num_questions']}")
+                            st.write(f"• **Created:** {quiz['created_at'].split('T')[0]}")
+                            st.write(f"• **Status:** {'✅ Assigned' if quiz['status'] == 'assigned' else '📝 Created'}")
+                        
+                        with col2:
+                            if quiz["status"] == "assigned":
+                                st.markdown("**Assignment Stats:**")
+                                st.write(f"• **Assigned to:** {quiz.get('total_assigned', 0)} students")
+                                st.write(f"• **Completed:** {quiz.get('completed_count', 0)} students")
+                                completion_rate = quiz.get('completion_rate', 0)
+                                st.write(f"• **Completion Rate:** {completion_rate:.1f}%")
+                                if quiz.get('completed_count', 0) > 0:
+                                    st.write(f"• **Average Score:** {quiz.get('average_score', 0):.1f}%")
+                                
+                                # Progress bar
+                                if quiz.get('total_assigned', 0) > 0:
+                                    progress = quiz.get('completed_count', 0) / quiz.get('total_assigned', 1)
+                                    st.progress(progress)
+                            else:
+                                st.info("This quiz hasn't been assigned to students yet.")
+                        
+                        if quiz.get('assignment_message'):
+                            st.markdown("**Assignment Message:**")
+                            st.write(f"_{quiz['assignment_message']}_")
+            
+            # Analytics section
+            if assigned_quizzes > 0:
+                st.markdown("---")
+                st.markdown("### 📈 Analytics")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Completion rates chart
+                    completion_data = [(q["topic"], q.get("completion_rate", 0)) for q in history_data if q["status"] == "assigned"]
+                    if completion_data:
+                        topics, rates = zip(*completion_data)
+                        fig = px.bar(
+                            x=list(topics), 
+                            y=list(rates),
+                            title="Completion Rates by Quiz Topic",
+                            labels={'x': 'Quiz Topic', 'y': 'Completion Rate (%)'}
+                        )
+                        fig.update_layout(showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    # Average scores chart
+                    score_data = [(q["topic"], q.get("average_score", 0)) for q in history_data if q.get("completed_count", 0) > 0]
+                    if score_data:
+                        topics, scores = zip(*score_data)
+                        fig = px.bar(
+                            x=list(topics), 
+                            y=list(scores),
+                            title="Average Scores by Quiz Topic",
+                            labels={'x': 'Quiz Topic', 'y': 'Average Score (%)'},
+                            color=list(scores),
+                            color_continuous_scale="RdYlGn"
+                        )
+                        fig.update_layout(showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.error(f"Failed to load quiz history: {response.text}")
+            
+    except Exception as e:
+        st.error(f"Error loading quiz history: {str(e)}")
+        st.info("Make sure the backend server is running on http://localhost:8000")
+    
+    # Show detailed analytics
     analytics = AnalyticsComponent("http://localhost:8000/api")
     students_data = analytics.get_students_analytics()
     
-    if not students_data:
-        st.info("No quiz history available yet. Quizzes will appear here after they are created and assigned.")
+    if students_data:
+        st.markdown("### 📊 Quiz Performance Analytics")
+        
+        # Collect all quiz results
+        all_quiz_results = []
+        for student in students_data:
+            for quiz_result in student['quiz_history']:
+                quiz_result['student_name'] = student['name']
+                quiz_result['student_email'] = student['email']
+                all_quiz_results.append(quiz_result)
+        
+        if all_quiz_results:
+            # Convert to DataFrame for better display
+            import pandas as pd
+            df = pd.DataFrame(all_quiz_results)
+            df['submitted_at'] = pd.to_datetime(df['submitted_at']).dt.strftime('%Y-%m-%d %H:%M')
+            df = df.sort_values('submitted_at', ascending=False)
+            
+            # Summary statistics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("📝 Total Submissions", len(all_quiz_results))
+            with col2:
+                st.metric("📊 Average Score", f"{df['score'].mean():.1f}%")
+            with col3:
+                st.metric("🏆 Highest Score", f"{df['score'].max():.1f}%")
+            with col4:
+                unique_topics = df['topic'].nunique()
+                st.metric("📚 Topics Covered", unique_topics)
+            
+            # Performance by topic
+            st.markdown("#### � Performance by Topic")
+            topic_stats = df.groupby('topic').agg({
+                'score': ['mean', 'count', 'max', 'min']
+            }).round(1)
+            topic_stats.columns = ['Average Score', 'Submissions', 'Highest', 'Lowest']
+            st.dataframe(topic_stats, use_container_width=True)
+            
+            # Recent submissions
+            st.markdown("#### 🕒 Recent Quiz Submissions")
+            display_cols = ['student_name', 'topic', 'difficulty', 'score', 'correct_answers', 'total_questions', 'submitted_at']
+            st.dataframe(df[display_cols].head(20), use_container_width=True)
+        else:
+            st.info("No quiz submissions yet.")
         return
     
     # Get all unique quizzes from student histories
@@ -1045,3 +1327,6 @@ def render_quiz_history():
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("No students have completed this quiz yet.")
+
+if __name__ == "__main__":
+    render_educator_dashboard()
