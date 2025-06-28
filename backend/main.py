@@ -105,19 +105,39 @@ init_predefined_users()
 async def startup_event():
     """Initialize database users on startup"""
     try:
-        import requests
-        # Wait a moment for the server to start
-        import asyncio
-        await asyncio.sleep(1)
+        # Import database modules directly
+        from db import SessionLocal, UserDB, Base, engine
+        from routers.auth import users_db
         
-        # Initialize users in database
-        response = requests.post("http://localhost:8000/api/auth/init-db-users")
-        if response.status_code == 200:
-            print("✅ Database users initialized successfully")
-        else:
-            print(f"⚠️ Failed to initialize database users: {response.text}")
+        # Ensure database tables are created
+        Base.metadata.create_all(bind=engine)
+        
+        db = SessionLocal()
+        try:
+            # Add all predefined users to the database
+            for user_id, user_data in users_db.items():
+                # Check if user already exists in database
+                existing = db.query(UserDB).filter(UserDB.email == user_data["email"]).first()
+                if not existing:
+                    db_user = UserDB(
+                        id=user_data["id"],
+                        email=user_data["email"],
+                        name=user_data["name"],
+                        role=user_data["role"],
+                        hashed_password=user_data["hashed_password"]
+                    )
+                    db.add(db_user)
+            
+            db.commit()
+            print(f"✅ Database users initialized successfully - {len(users_db)} users")
+            
+        finally:
+            db.close()
+            
     except Exception as e:
         print(f"⚠️ Could not initialize database users: {e}")
+        if 'db' in locals():
+            db.close()
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

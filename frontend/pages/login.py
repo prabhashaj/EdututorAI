@@ -17,14 +17,6 @@ def render_login_page():
     # Custom CSS
     st.markdown("""
     <style>
-        .login-container {
-            max-width: 400px;
-            margin: 0 auto;
-            padding: 2rem;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
         .login-header {
             text-align: center;
             color: #1f77b4;
@@ -41,9 +33,6 @@ def render_login_page():
     # Initialize auth handler
     auth_handler = AuthHandler("http://localhost:8000/api")
     
-    # Main login container
-    st.markdown('<div class="login-container">', unsafe_allow_html=True)
-    
     # Header
     st.markdown('<h1 class="login-header">🎓 EduTutor AI</h1>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666;">Personalized Learning with AI</p>', unsafe_allow_html=True)
@@ -53,16 +42,15 @@ def render_login_page():
     
     # Predefined accounts section
     st.markdown('<div class="demo-section">', unsafe_allow_html=True)
-    st.markdown("#### 🔑 Available Accounts")
-    st.info("Use these predefined accounts to login:")
+    st.markdown("#### 🔑 Demo Logins")
+    st.info("Quick access to demo accounts:")
     
     # Create two columns for the predefined accounts
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("##### 👨‍� Educator Account")
-        st.code("Email: educator@edututor.ai\nPassword: educator123")
-        if st.button("👨‍� Login as Educator", use_container_width=True):
+        st.markdown("##### 👨‍🏫 Educator Demo")
+        if st.button("👨‍🏫 Login as Educator", use_container_width=True, type="primary"):
             result = auth_handler.login("educator@edututor.ai", "educator123")
             if result:
                 st.session_state.user = result.get('user')
@@ -73,51 +61,14 @@ def render_login_page():
                 st.rerun()
     
     with col2:
-        st.markdown("##### 👨‍� Student Account")
-        st.code("Email: student@edututor.ai\nPassword: student123")
-        if st.button("👨‍� Login as Student", use_container_width=True):
+        st.markdown("##### 👨‍🎓 Student Demo")
+        if st.button("👨‍🎓 Login as Student", use_container_width=True, type="secondary"):
             result = auth_handler.login("student@edututor.ai", "student123")
             if result:
                 st.session_state.user = result.get('user')
                 st.session_state.access_token = result.get('access_token')
                 st.success("✅ Login successful!")
                 st.rerun()
-    
-    # Show available student accounts
-    st.markdown("---")
-    st.markdown("##### 📚 More Student Accounts")
-    
-    # Fetch demo students from backend
-    try:
-        import requests
-        response = requests.get("http://localhost:8000/api/auth/demo-students")
-        if response.status_code == 200:
-            students_data = response.json().get("students", [])
-            
-            # Show first 6 students in expandable section
-            with st.expander(f"👥 View All {len(students_data)} Available Student Accounts", expanded=False):
-                cols = st.columns(3)
-                for i, student in enumerate(students_data[:12]):  # Show first 12 students
-                    col = cols[i % 3]
-                    with col:
-                        st.markdown(f"**{student['name']}**")
-                        st.code(f"Email: {student['email']}\nPassword: {student['password']}")
-                        if st.button(f"Login as {student['name'].split()[0]}", 
-                                   key=f"login_{student['id']}", 
-                                   use_container_width=True):
-                            result = auth_handler.login(student['email'], student['password'])
-                            if result:
-                                st.session_state.user = result.get('user')
-                                st.session_state.access_token = result.get('access_token')
-                                st.success(f"✅ Logged in as {student['name']}!")
-                                st.rerun()
-        else:
-            st.warning("Could not fetch student accounts from server")
-    except Exception as e:
-        st.warning(f"Could not connect to server: {e}")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 def render_login_form(auth_handler):
     """Render login form"""

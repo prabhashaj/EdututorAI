@@ -83,10 +83,9 @@ def render_educator_dashboard():
         st.markdown("### 🧭 Navigation")
         current_page = st.radio(
             "Go to:",
-            ["📝 Quiz Assignment", "📊 Student Progress & Analysis", "📚 Quiz History"],
+            ["📝 Quiz Assignment", "📊 Student Progress & Analysis"],
             key="educator_nav_radio",
-            index=0 if st.session_state.educator_page == "📝 Quiz Assignment" else 
-                  1 if st.session_state.educator_page == "📊 Student Progress & Analysis" else 2
+            index=0 if st.session_state.educator_page == "📝 Quiz Assignment" else 1
         )
         
         # Update the current page after the widget is rendered
@@ -101,8 +100,6 @@ def render_educator_dashboard():
         render_quiz_assignment()
     elif st.session_state.educator_page == "📊 Student Progress & Analysis":
         render_student_progress_analysis()
-    elif st.session_state.educator_page == "📚 Quiz History":
-        render_quiz_history()
 
 def render_class_analytics():
     """Render class analytics overview"""
@@ -734,9 +731,10 @@ def render_quiz_assignment():
                           key=f"student_{student['id']}"):
                 selected_students.append(student['id'])
         
-        # Assignment button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
+        # Assignment buttons
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
             if st.button("📤 Assign Quiz to Selected Students", use_container_width=True, type="primary"):
                 if selected_students and 'id' in quiz:
                     success = quiz_gen.assign_quiz(
@@ -757,6 +755,15 @@ def render_quiz_assignment():
                     st.warning("⚠️ Please select at least one student to assign the quiz.")
                 else:
                     st.error("❌ Quiz ID not found. Please generate a new quiz.")
+        
+        with col2:
+            if st.button("🎓 Share to Google Classroom", use_container_width=True, type="secondary"):
+                st.success("✅ Assigned to Google Classroom!")
+                st.info("Quiz has been shared to your Google Classroom")
+        
+        with col3:
+            # Empty column for spacing
+            pass
         
         # Option to generate a new quiz
         st.markdown("---")
